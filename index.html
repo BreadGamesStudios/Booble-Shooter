@@ -1,0 +1,207 @@
+
+```html
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Shooter Classic - HTML5/Mobile</title>
+    <style>
+        body { margin: 0; background-color: #2c3e50; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: sans-serif; }
+        canvas { border: 4px solid #fff; border-radius: 10px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+    </style>
+    <!-- Importando o Phaser 3 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
+</head>
+<body>
+
+<script>
+const COLORS = [0xff4757, 0x2ed573, 0x1e90ff, 0ffa502, 0x9b59b6]; // Vermelho, Verde, Azul, Laranja, Roxo
+const BUBBLE_RADIUS = 20;
+
+const config = {
+    type: Phaser.AUTO,
+    width: 440,
+    height: 600,
+    backgroundColor: '#34495e',
+    physics: {
+        default: 'arcade',
+        arcade: { debug: false }
+    },
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    }
+};
+
+const game = new Phaser.Game(config);
+
+let bubbles;
+let currentBubble;
+let nextBubbleColor;
+let canShoot = true;
+let score = 0;
+let scoreText;
+let graphics;
+
+function preload() {
+    // Usaremos gráficos gerados por código (não precisa carregar imagens externas)
+}
+
+function create() {
+    // Grupo de física para as bolhas no teto
+    bubbles = this.physics.add.staticGroup();
+
+    // Criar o teto inicial de bolhas
+    generateGrid(this);
+
+    // Texto de Score
+    scoreText = this.add.text(20, 20, 'Score: 0', { fontSize: '20px', fill: '#fff', fontStyle: 'bold' });
+
+    // Desenha o "canhão"
+    this.add.circle(220, 560, 30, 0x2c3e50).setStrokeStyle(2, 0xffffff);
+    
+    // Preparar o primeiro tiro
+    prepareNextBubble(this);
+
+    // Gráficos para a linha de mira
+    graphics = this.add.graphics();
+
+    // Input (Toque no Celular ou Clique no PC)
+    this.input.on('pointerpointermove', (pointer) => drawTrajectory(pointer));
+    this.input.on('pointerup', (pointer) => shootBubble(this, pointer));
+}
+
+function update() {
+    drawTrajectory(this.input.activePointer);
+}
+
+// --- LÓGICA DO JOGO ---
+
+function generateGrid(scene) {
+    const rows = 5;
+    const cols = 10;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            let x = c * (BUBBLE_RADIUS * 2) + BUBBLE_RADIUS + 20;
+            if (r % 2 === 1) x += BUBBLE_RADIUS; // Deslocamento hexagonal
+            let y = r * (BUBBLE_RADIUS * 1.8) + BUBBLE_RADIUS + 60;
+
+            if (x < 420) {
+                const color = Phaser.Utils.Array.GetRandom(COLORS);
+                createBubble(scene, x, y, color, true);
+            }
+        }
+    }
+}
+
+function createBubble(scene, x, y, color, isStatic) {
+    const circle = scene.add.circle(0, 0, BUBBLE_RADIUS, color);
+    circle.setStrokeStyle(1, 0xffffff);
+    
+    // Converte o círculo em uma imagem/textura para física
+    const container = scene.add.container(x, y, [circle]);
+    container.setSize(BUBBLE_RADIUS * 2, BUBBLE_RADIUS * 2);
+    
+    if (isStatic) {
+        bubbles.add(container);
+        container.body.setCircle(BUBBLE_RADIUS);
+        container.color = color;
+    }
+    return container;
+}
+
+function prepareNextBubble(scene) {
+    const color = nextBubbleColor || Phaser.Utils.Array.GetRandom(COLORS);
+    nextBubbleColor = Phaser.Utils.Array.GetRandom(COLORS);
+
+    currentBubble = createBubble(scene, 220, 560, color, false);
+    scene.physics.add.existing(currentBubble);
+    currentBubble.body.setCircle(BUBBLE_RADIUS);
+    currentBubble.body.setCollideWorldBounds(true);
+    currentBubble.body.setBounce(1, 1);
+    currentBubble.color = color;
+
+    // Mostra a próxima bolha menorzinha no canto
+    if (scene.nextDisplay) scene.nextDisplay.destroy();
+    scene.nextDisplay = scene.add.circle(380, 560, 15, nextBubbleColor).setStrokeStyle(1, 0xffffff);
+
+    canShoot = true;
+}
+
+function drawTrajectory(pointer) {
+    if (!canShoot || !pointer) return;
+    
+    graphics.clear();
+    graphics.lineStyle(2, 0xffffff, 0.5);
+    
+    const angle = Phaser.Math.Angle.Between(220, 560, pointer.x, pointer.y);
+    
+    // Só desenha se estiver apontando para cima
+    if (angle < -0.2 && angle > -2.9) {
+        const destX = 220 + Math.cos(angle) * 1000;
+        const destY = 560 + Math.sin(angle) * 1000;
+        graphics.lineBetween(220, 560, destX, destY);
+    }
+}
+
+function shootBubble(scene, pointer) {
+    if (!canShoot) return;
+
+    const angle = Phaser.Math.Angle.Between(220, 560, pointer.x, pointer.y);
+
+    if (angle < -0.2 && angle > -2.9) { // Impedir atirar para baixo
+        canShoot = false;
+        graphics.clear();
+
+        const speed = 600;
+        currentBubble.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+        // Colisão com as bolhas do teto
+        scene.physics.add.collider(currentBubble, bubbles, (bullet, hitBubble) => {
+            bullet.body.setVelocity(0);
+            bullet.body.setImmovable(true);
+            
+            // Fixa a bolha na grade
+            bubbles.add(bullet);
+            
+            checkMatch(scene, bullet);
+            prepareNextBubble(scene);
+        });
+    }
+}
+
+// Sistema simplificado de Match-3 (Para o protótipo)
+function checkMatch(scene, landedBubble) {
+    const matches = [landedBubble];
+    
+    bubbles.getChildren().forEach(b => {
+        if (b !== landedBubble && b.color === landedBubble.color) {
+            const dist = Phaser.Math.Distance.Between(landedBubble.x, landedBubble.y, b.x, b.y);
+            if (dist < BUBBLE_RADIUS * 2.5) {
+                matches.push(b);
+            }
+        }
+    });
+
+    if (matches.length >= 3) {
+        matches.forEach(b => {
+            // Efeito visual ao estourar
+            scene.tweens.add({
+                targets: b,
+                scale: 0,
+                duration: 200,
+                onComplete: () => b.destroy()
+            });
+            score += 10;
+        });
+        scoreText.setText('Score: ' + score);
+    }
+}
+</script>
+
+</body>
+</html>
+```
+
